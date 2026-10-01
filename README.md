@@ -118,8 +118,21 @@ Add it to your MCP client (for example LM Studio's `mcp.json`, Claude Desktop or
   }
 }
 ```
+#### Assistants without a `cwd` setting (e.g. Unsloth desktop)
 
-That's it. On startup vector-brain finds `metadata-schemas.json` in `cwd` and:
+Some MCP clients, such as the Unsloth desktop app, only let you set an executable, its arguments
+and environment variables. They have no working-directory (`cwd`) field. That breaks the plain
+setup in two ways:
+
+- `uv run vector-brain` is started from whatever folder the app happens to be in, so uv can't
+  find the project and fails with `program not found`.
+- vector-brain looks for `metadata-schemas.json` in the current folder, so even if it started,
+  your collections wouldn't load.
+
+The fix is to use `uv` as the executable with the arguments `run`, `--directory`, `C:\path\to\vector-brain`, `vector-brain`.
+
+
+**That's it**. On startup vector-brain finds `metadata-schemas.json` in `cwd` and:
 
 - generates tool descriptions listing every collection, its fields and allowed values
 - creates Qdrant payload indexes for each collection
@@ -129,6 +142,7 @@ That's it. On startup vector-brain finds `metadata-schemas.json` in `cwd` and:
 
 To use a network transport instead of stdio, run `uv run vector-brain --transport sse` or
 `--transport streamable-http`.
+
 
 ## The memory lifecycle
 
@@ -281,7 +295,6 @@ It can search the docs but never change them.
 uv sync           # install with dev dependencies
 uv run pytest     # run the test suite (uses in-memory Qdrant, no server needed)
 ```
-
-## License
-
-Apache License 2.0
+---
+Parts of this project — including code and documentation — were developed with the
+assistance of Cline (AI coding agent) using Anthropic's Claude models, under human direction and review.
