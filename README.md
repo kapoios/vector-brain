@@ -1,488 +1,287 @@
-# mcp-server-qdrant: A Qdrant MCP server
+# 🧠 vector-brain
 
-[![smithery badge](https://smithery.ai/badge/mcp-server-qdrant)](https://smithery.ai/protocol/mcp-server-qdrant)
+**Give your AI a long-term memory that actually stays organised.**
 
-> The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) is an open protocol that enables
-> seamless integration between LLM applications and external data sources and tools. Whether you're building an
-> AI-powered IDE, enhancing a chat interface, or creating custom AI workflows, MCP provides a standardized way to
-> connect LLMs with the context they need.
+Most LLM chats forget everything the moment the window closes. vector-brain is an
+[MCP](https://modelcontextprotocol.io) server that gives any MCP-capable assistant a persistent,
+searchable brain backed by the [Qdrant](https://qdrant.tech) vector database. The assistant can
+remember facts, look them up by meaning, fix them when they change, and forget them when you ask.
 
-This repository is an example of how to create a MCP server for [Qdrant](https://qdrant.tech/), a vector search engine.
+What sets it apart is that the brain has **regions**. Instead of one big pile of memories, you set
+up separate collections, each with its own structure and rules. Personal facts, project notes and
+reference docs each live in their own collection, and the assistant is told exactly how to use
+each one.
 
-## Overview
+```
+                  +------------------------ vector-brain -------------------------+
+ "Remember I      |                                                               |
+  prefer dark  -->|  ai_thoughts         project_notes       api_documentation    |
+  mode"           |  read + write        read + write        read only            |
+                  |  category, tags,     project, priority   method, path, type   |
+ "What do you     |  importance, ...                                              |
+  know about   -->|                                                               |
+  my setup?"      |      search by meaning  +  exact metadata filters             |
+                  +-------------------------------+-------------------------------+
+                                                  |
+                                           Qdrant vector DB
+```
 
-An official Model Context Protocol server for keeping and retrieving memories in the Qdrant vector search engine.
-It acts as a semantic memory layer on top of the Qdrant database.
+## Why vector-brain?
 
-## Components
+- **🗂️ Memory with regions.** Define as many collections as you like in one
+  `metadata-schemas.json`. Each one is a separate area of the brain with its own fields.
+- **🏷️ Structured recall, not just similarity.** Every memory carries typed metadata
+  (`category`, `importance`, `confidence`, `tags`, anything you define). The assistant can
+  combine meaning-based search with exact filters, for example *"credentials with high
+  importance"*.
+- **🗣️ Self-describing tools.** Tool descriptions are generated from your schemas, so the
+  assistant knows which collections exist, which fields each one has and which values are
+  allowed, without any prompt engineering on your part.
+- **📖 Knowledge it can read but not change.** Mark a collection `read_only` (for example API
+  docs filled by an ingestion script). The assistant can search it but can never overwrite or
+  delete it.
+- **🛡️ No stray memories.** Writes are only accepted into collections you defined and enabled. A
+  mistyped collection name returns an error instead of quietly creating a new collection.
+- **🕰️ It knows when it learned something.** `created_at` is stamped on every new memory and
+  `updated_at` on every edit, and both are indexed so they can be filtered.
+- **✏️ Memories can change.** Beyond store and search, the assistant can edit or delete a memory
+  by describing it. No IDs to track.
+- **⚡ Fast filtering.** Qdrant payload indexes are created automatically for every schema field.
+- **🔌 Works with your client.** stdio, SSE or streamable HTTP, with local embeddings via
+  FastEmbed, so no API key is needed for embeddings.
 
-### Tools
+## Quick Start
 
-1. `qdrant-store`
-   - Store some information in the Qdrant database
-   - Input:
-     - `information` (string): Information to store
-     - `metadata` (JSON): Optional metadata to store
-     - `collection_name` (string): Name of the collection to store the information in. This field is required if there are no default collection name.
-                                   If there is a default collection name, this field is not enabled.
-   - Returns: Confirmation message
-2. `qdrant-find`
-   - Retrieve relevant information from the Qdrant database
-   - Input:
-     - `query` (string): Query to use for searching
-     - `collection_name` (string): Name of the collection to store the information in. This field is required if there are no default collection name.
-                                   If there is a default collection name, this field is not enabled.
-   - Returns: Information stored in the Qdrant database as separate messages
+**Prerequisites:** Python 3.10+, [uv](https://docs.astral.sh/uv/) and a running Qdrant instance
+(for example `docker run -p 6333:6333 qdrant/qdrant`).
+
+### 1. Install
+
+```bash
+git clone https://github.com/kapoios/vector-brain.git
+cd vector-brain
+uv sync
+```
+
+### 2. Design your brain
+
+Create `metadata-schemas.json` in the server's working directory (the repo ships with an example):
+
+```json
+{
+  "ai_thoughts": {
+    "enabled": true,
+    "read_only": false,
+    "field_prefix": "metadata",
+    "fields": {
+      "category": {
+        "type": "keyword",
+        "values": ["credential", "personal", "technical", "social", "financial", "health", "work", "general"]
+      },
+      "tags": { "type": "keyword" },
+      "subject": { "type": "keyword" },
+      "importance": { "type": "keyword", "values": ["low", "medium", "high", "critical"] },
+      "confidence": { "type": "float" },
+      "source": { "type": "keyword", "values": ["user_stated", "observed", "inferred", "researched"] },
+      "sentiment": { "type": "keyword", "values": ["positive", "negative", "neutral", "urgent"] }
+    }
+  },
+  "api_documentation": {
+    "enabled": true,
+    "read_only": true,
+    "field_prefix": "",
+    "fields": {
+      "type": { "type": "keyword", "values": ["endpoint", "data_model"] },
+      "method": { "type": "keyword", "values": ["GET", "POST", "PUT", "DELETE", "PATCH"] },
+      "path": { "type": "keyword" },
+      "tags": { "type": "keyword" }
+    }
+  }
+}
+```
+
+### 3. Connect your assistant
+
+Add it to your MCP client (for example LM Studio's `mcp.json`, Claude Desktop or Cursor):
+
+```json
+{
+  "vector-brain": {
+    "command": "uv",
+    "args": ["run", "vector-brain"],
+    "cwd": "C:\\path\\to\\vector-brain",
+    "env": {
+      "QDRANT_URL": "http://127.0.0.1:6333",
+      "EMBEDDING_MODEL": "jinaai/jina-embeddings-v3",
+      "QDRANT_ALLOW_ARBITRARY_FILTER": "true"
+    }
+  }
+}
+```
+
+That's it. On startup vector-brain finds `metadata-schemas.json` in `cwd` and:
+
+- generates tool descriptions listing every collection, its fields and allowed values
+- creates Qdrant payload indexes for each collection
+- enforces `read_only` per collection
+- rejects writes to collections that aren't defined (or are disabled)
+- adds `created_at` / `updated_at` timestamps automatically
+
+To use a network transport instead of stdio, run `uv run vector-brain --transport sse` or
+`--transport streamable-http`.
+
+## The memory lifecycle
+
+| The assistant wants to… | Tool | What happens |
+|---|---|---|
+| **Remember** something | `qdrant-store` | The text is embedded and saved with its metadata and a `created_at` timestamp |
+| **Recall** something | `qdrant-find` | Search by meaning in any collection, optionally narrowed with metadata filters |
+| **Update** a memory | `qdrant-edit` | The closest match is rewritten in place; metadata is kept unless replaced; `updated_at` is set |
+| **Forget** a memory | `qdrant-delete` | The closest match is removed and its content is returned as confirmation |
+
+A typical conversation:
+
+> **You:** My staging server is at 10.0.0.12, remember that.
+> *→ `qdrant-store` into `ai_thoughts` with `{"category": "technical", "importance": "high"}`*
+>
+> **You (a week later):** What's the staging IP again?
+> *→ `qdrant-find` in `ai_thoughts` → "10.0.0.12"*
+>
+> **You:** We moved staging to 10.0.0.40.
+> *→ `qdrant-edit` rewrites the memory, keeps its metadata, stamps `updated_at`*
+
+## Tools Reference
+
+### `qdrant-store`
+Store a memory with metadata. Blocked on read-only and unconfigured collections. Adds a
+`created_at` timestamp unless one is supplied.
+- `information` (string): text to remember
+- `collection_name` (string): target collection (only writable collections are listed)
+- `metadata` (JSON, optional): fields as defined in the collection's schema
+
+### `qdrant-find`
+Search any enabled collection, including read-only ones.
+- `query` (string): what to search for, matched by meaning
+- `collection_name` (string): collection to search (all enabled collections are listed)
+- `query_filter` (JSON, optional, needs `QDRANT_ALLOW_ARBITRARY_FILTER=true`): a Qdrant filter, e.g.
+  `{"must": [{"key": "metadata.category", "match": {"value": "credential"}}]}`
+
+Returns the matching memories with their content and metadata.
+
+### `qdrant-edit`
+Rewrite the closest matching memory. Blocked on read-only and unconfigured collections. Existing
+metadata is kept unless new metadata is given, and `updated_at` is always set.
+- `query` (string): describes the memory to update
+- `information` (string): the replacement text
+- `collection_name` (string): only writable collections are listed
+- `metadata` (JSON, optional): replacement metadata
+- `query_filter` (JSON, optional, needs `QDRANT_ALLOW_ARBITRARY_FILTER=true`): Qdrant filter to
+  narrow which memory is matched
+
+### `qdrant-delete`
+Forget the closest matching memory. Blocked on read-only and unconfigured collections.
+- `query` (string): describes the memory to delete
+- `collection_name` (string): only writable collections are listed
+
+## Schema Reference
+
+### `metadata-schemas.json` format
+
+```json
+{
+  "collection_name": {
+    "enabled": true,
+    "read_only": false,
+    "field_prefix": "metadata",
+    "fields": {
+      "field_name": {
+        "type": "keyword|float|integer|boolean",
+        "values": ["optional", "list", "of", "allowed", "values"]
+      }
+    }
+  }
+}
+```
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Set to `false` to switch a collection off without deleting its config (writes to it are rejected) |
+| `read_only` | boolean | `false` | If `true`, store, edit and delete are blocked for this collection |
+| `field_prefix` | string | `"metadata"` | Payload path prefix. Use `""` for top-level fields (e.g. externally populated collections) |
+| `fields` | object | `{}` | Field definitions. Each field has a `type` and optional `values` |
+| `fields.*.type` | string | `"keyword"` | One of `keyword`, `float`, `integer`, `boolean` |
+| `fields.*.values` | array | `null` | Allowed values, shown to the assistant in the tool description |
+
+### Where schemas are loaded from
+
+1. `METADATA_SCHEMAS` env var (inline JSON string), highest priority
+2. `METADATA_SCHEMAS_FILE` env var (path to a JSON file)
+3. `metadata-schemas.json` in `cwd`, found automatically (recommended)
+
+### Single-collection mode
+
+If no schemas are found, vector-brain runs as a simple single-collection memory:
+- `COLLECTION_NAME` fixes the collection used by every tool
+- tool descriptions come from the defaults or the `TOOL_*_DESCRIPTION` env vars
+
+In either mode, `QDRANT_READ_ONLY=true` makes the whole server read-only: only `qdrant-find` is
+exposed.
+
+## Example: a personal brain plus read-only reference docs
+
+```json
+{
+  "ai_thoughts": {
+    "read_only": false,
+    "fields": {
+      "category": { "type": "keyword", "values": ["credential", "personal", "technical"] },
+      "tags": { "type": "keyword" },
+      "importance": { "type": "keyword", "values": ["low", "medium", "high", "critical"] }
+    }
+  },
+  "api_documentation": {
+    "read_only": true,
+    "field_prefix": "",
+    "fields": {
+      "type": { "type": "keyword", "values": ["endpoint", "data_model"] },
+      "method": { "type": "keyword" },
+      "path": { "type": "keyword" }
+    }
+  }
+}
+```
+
+The assistant builds up its own memories in `ai_thoughts` and looks things up in
+`api_documentation`, which is filled by an external process such as an OpenAPI ingestion script.
+It can search the docs but never change them.
 
 ## Environment Variables
 
-Configuration is done via environment variables. The only command-line argument is `--transport`, used to select the [transport protocol](#transport-protocols).
+| Name | Description | Default |
+|---|---|---|
+| `QDRANT_URL` | URL of the Qdrant server | None |
+| `QDRANT_API_KEY` | API key for the Qdrant server | None |
+| `QDRANT_LOCAL_PATH` | Path to a local on-disk Qdrant database (instead of `QDRANT_URL`) | None |
+| `EMBEDDING_PROVIDER` | Embedding provider (`fastembed`) | `fastembed` |
+| `EMBEDDING_MODEL` | Embedding model name | `sentence-transformers/all-MiniLM-L6-v2` |
+| `QDRANT_ALLOW_ARBITRARY_FILTER` | Let the assistant build metadata filters | `false` |
+| `QDRANT_SEARCH_LIMIT` | Max results per search | `10` |
+| `METADATA_SCHEMAS` | Inline JSON schemas (overrides the file) | None |
+| `METADATA_SCHEMAS_FILE` | Path to a schemas JSON file | None |
+| `COLLECTION_NAME` | Fixed collection (single-collection mode only) | None |
+| `QDRANT_READ_ONLY` | Global read-only flag: hides store, edit and delete | `false` |
+| `TOOL_STORE_DESCRIPTION` | Override the generated store description | Generated |
+| `TOOL_FIND_DESCRIPTION` | Override the generated find description | Generated |
+| `TOOL_EDIT_DESCRIPTION` | Override the generated edit description | Generated |
+| `TOOL_DELETE_DESCRIPTION` | Override the generated delete description | Generated |
 
-> [!NOTE]
-> You cannot provide both `QDRANT_URL` and `QDRANT_LOCAL_PATH` at the same time.
-
-| Name                     | Description                                                         | Default Value                                                     |
-|--------------------------|---------------------------------------------------------------------|-------------------------------------------------------------------|
-| `QDRANT_URL`             | URL of the Qdrant server                                            | None                                                              |
-| `QDRANT_API_KEY`         | API key for the Qdrant server                                       | None                                                              |
-| `COLLECTION_NAME`        | Name of the default collection to use.                              | None                                                              |
-| `QDRANT_LOCAL_PATH`      | Path to the local Qdrant database (alternative to `QDRANT_URL`)     | None                                                              |
-| `EMBEDDING_PROVIDER`     | Embedding provider to use (currently only "fastembed" is supported) | `fastembed`                                                       |
-| `EMBEDDING_MODEL`        | Name of the embedding model to use                                  | `sentence-transformers/all-MiniLM-L6-v2`                          |
-| `TOOL_STORE_DESCRIPTION` | Custom description for the store tool                               | See default in [`settings.py`](src/mcp_server_qdrant/settings.py) |
-| `TOOL_FIND_DESCRIPTION`  | Custom description for the find tool                                | See default in [`settings.py`](src/mcp_server_qdrant/settings.py) |
-| `QDRANT_SEARCH_LIMIT`    | Maximum number of results to return from search                     | `10`                                                              |
-| `QDRANT_READ_ONLY`       | Enable read-only mode (disables `qdrant-store` tool)                | `false`                                                           |
-
-### FastMCP Environment Variables
-
-Since `mcp-server-qdrant` is based on FastMCP, it also supports all the FastMCP environment variables. The most
-important ones are listed below:
-
-| Environment Variable                       | Description                                                     | Default Value |
-|--------------------------------------------|-----------------------------------------------------------------|---------------|
-| `FASTMCP_LOG_LEVEL`                        | Set logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)       | `INFO`        |
-| `FASTMCP_SERVER_DEBUG`                     | Enable debug mode                                               | `false`       |
-| `FASTMCP_SERVER_HOST`                      | Host address to bind the server to                              | `127.0.0.1`   |
-| `FASTMCP_SERVER_PORT`                      | Port to run the server on                                       | `8000`        |
-| `FASTMCP_SERVER_ON_DUPLICATE_RESOURCES`    | Behavior for duplicate resources (warn, error, replace, ignore) | `warn`        |
-| `FASTMCP_SERVER_ON_DUPLICATE_TOOLS`        | Behavior for duplicate tools (warn, error, replace, ignore)     | `warn`        |
-| `FASTMCP_SERVER_ON_DUPLICATE_PROMPTS`      | Behavior for duplicate prompts (warn, error, replace, ignore)   | `warn`        |
-| `FASTMCP_SERVER_DEPENDENCIES`              | List of dependencies to install in the server environment       | `[]`          |
-
-> [!NOTE]
-> Server-specific settings use the `FASTMCP_SERVER_` prefix. This may change in future versions.
-
-## Installation
-
-### Using uvx
-
-When using [`uvx`](https://docs.astral.sh/uv/guides/tools/#running-tools) no specific installation is needed to directly run *mcp-server-qdrant*.
-
-```shell
-QDRANT_URL="http://localhost:6333" \
-COLLECTION_NAME="my-collection" \
-EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2" \
-uvx mcp-server-qdrant
-```
-
-#### Transport Protocols
-
-The server supports different transport protocols that can be specified using the `--transport` flag:
-
-```shell
-QDRANT_URL="http://localhost:6333" \
-COLLECTION_NAME="my-collection" \
-uvx mcp-server-qdrant --transport sse
-```
-
-Supported transport protocols:
-
-- `stdio` (default): Standard input/output transport, might only be used by local MCP clients
-- `sse`: Server-Sent Events transport, perfect for remote clients
-- `streamable-http`: Streamable HTTP transport, perfect for remote clients, more recent than SSE
-
-The default transport is `stdio` if not specified.
-
-When SSE transport is used, the server will listen on the specified port and wait for incoming connections. The default
-port is 8000, however it can be changed using the `FASTMCP_SERVER_PORT` environment variable.
-
-```shell
-QDRANT_URL="http://localhost:6333" \
-COLLECTION_NAME="my-collection" \
-FASTMCP_SERVER_PORT=1234 \
-uvx mcp-server-qdrant --transport sse
-```
-
-### Using Docker
-
-A Dockerfile is available for building and running the MCP server:
+## Development
 
 ```bash
-# Build the container
-docker build -t mcp-server-qdrant .
-
-# Run the container
-docker run -p 8000:8000 \
-  -e FASTMCP_SERVER_HOST="0.0.0.0" \
-  -e QDRANT_URL="http://your-qdrant-server:6333" \
-  -e QDRANT_API_KEY="your-api-key" \
-  -e COLLECTION_NAME="your-collection" \
-  mcp-server-qdrant
+uv sync           # install with dev dependencies
+uv run pytest     # run the test suite (uses in-memory Qdrant, no server needed)
 ```
-
-> [!TIP]
-> Please note that we set `FASTMCP_SERVER_HOST="0.0.0.0"` to make the server listen on all network interfaces. This is
-> necessary when running the server in a Docker container.
-
-### Installing via Smithery
-
-To install Qdrant MCP Server for Claude Desktop automatically via [Smithery](https://smithery.ai/protocol/mcp-server-qdrant):
-
-```bash
-npx @smithery/cli install mcp-server-qdrant --client claude
-```
-
-### Manual configuration of Claude Desktop
-
-To use this server with the Claude Desktop app, add the following configuration to the "mcpServers" section of your
-`claude_desktop_config.json`:
-
-```json
-{
-  "qdrant": {
-    "command": "uvx",
-    "args": ["mcp-server-qdrant"],
-    "env": {
-      "QDRANT_URL": "https://xyz-example.eu-central.aws.cloud.qdrant.io:6333",
-      "QDRANT_API_KEY": "your_api_key",
-      "COLLECTION_NAME": "your-collection-name",
-      "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2"
-    }
-  }
-}
-```
-
-For local Qdrant mode:
-
-```json
-{
-  "qdrant": {
-    "command": "uvx",
-    "args": ["mcp-server-qdrant"],
-    "env": {
-      "QDRANT_LOCAL_PATH": "/path/to/qdrant/database",
-      "COLLECTION_NAME": "your-collection-name",
-      "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2"
-    }
-  }
-}
-```
-
-This MCP server will automatically create a collection with the specified name if it doesn't exist.
-
-By default, the server will use the `sentence-transformers/all-MiniLM-L6-v2` embedding model to encode memories.
-For the time being, only [FastEmbed](https://qdrant.github.io/fastembed/) models are supported.
-
-## Support for other tools
-
-This MCP server can be used with any MCP-compatible client. For example, you can use it with
-[Cursor](https://docs.cursor.com/context/model-context-protocol) and [VS Code](https://code.visualstudio.com/docs), which provide built-in support for the Model Context
-Protocol.
-
-### Using with Cursor/Windsurf
-
-You can configure this MCP server to work as a code search tool for Cursor or Windsurf by customizing the tool
-descriptions:
-
-```bash
-QDRANT_URL="http://localhost:6333" \
-COLLECTION_NAME="code-snippets" \
-TOOL_STORE_DESCRIPTION="Store reusable code snippets for later retrieval. \
-The 'information' parameter should contain a natural language description of what the code does, \
-while the actual code should be included in the 'metadata' parameter as a 'code' property. \
-The value of 'metadata' is a Python dictionary with strings as keys. \
-Use this whenever you generate some code snippet." \
-TOOL_FIND_DESCRIPTION="Search for relevant code snippets based on natural language descriptions. \
-The 'query' parameter should describe what you're looking for, \
-and the tool will return the most relevant code snippets. \
-Use this when you need to find existing code snippets for reuse or reference." \
-uvx mcp-server-qdrant --transport sse # Enable SSE transport
-```
-
-In Cursor/Windsurf, you can then configure the MCP server in your settings by pointing to this running server using
-SSE transport protocol. The description on how to add an MCP server to Cursor can be found in the [Cursor
-documentation](https://docs.cursor.com/context/model-context-protocol#adding-an-mcp-server-to-cursor). If you are
-running Cursor/Windsurf locally, you can use the following URL:
-
-```
-http://localhost:8000/sse
-```
-
-> [!TIP]
-> We suggest SSE transport as a preferred way to connect Cursor/Windsurf to the MCP server, as it can support remote
-> connections. That makes it easy to share the server with your team or use it in a cloud environment.
-
-This configuration transforms the Qdrant MCP server into a specialized code search tool that can:
-
-1. Store code snippets, documentation, and implementation details
-2. Retrieve relevant code examples based on semantic search
-3. Help developers find specific implementations or usage patterns
-
-You can populate the database by storing natural language descriptions of code snippets (in the `information` parameter)
-along with the actual code (in the `metadata.code` property), and then search for them using natural language queries
-that describe what you're looking for.
-
-> [!NOTE]
-> The tool descriptions provided above are examples and may need to be customized for your specific use case. Consider
-> adjusting the descriptions to better match your team's workflow and the specific types of code snippets you want to
-> store and retrieve.
-
-**If you have successfully installed the `mcp-server-qdrant`, but still can't get it to work with Cursor, please
-consider creating the [Cursor rules](https://docs.cursor.com/context/rules-for-ai) so the MCP tools are always used when
-the agent produces a new code snippet.** You can restrict the rules to only work for certain file types, to avoid using
-the MCP server for the documentation or other types of content.
-
-### Using with Claude Code
-
-You can enhance Claude Code's capabilities by connecting it to this MCP server, enabling semantic search over your
-existing codebase.
-
-#### Setting up mcp-server-qdrant
-
-1. Add the MCP server to Claude Code:
-
-    ```shell
-    # Add mcp-server-qdrant configured for code search
-    claude mcp add code-search \
-    -e QDRANT_URL="http://localhost:6333" \
-    -e COLLECTION_NAME="code-repository" \
-    -e EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2" \
-    -e TOOL_STORE_DESCRIPTION="Store code snippets with descriptions. The 'information' parameter should contain a natural language description of what the code does, while the actual code should be included in the 'metadata' parameter as a 'code' property." \
-    -e TOOL_FIND_DESCRIPTION="Search for relevant code snippets using natural language. The 'query' parameter should describe the functionality you're looking for." \
-    -- uvx mcp-server-qdrant
-    ```
-
-2. Verify the server was added:
-
-    ```shell
-    claude mcp list
-    ```
-
-#### Using Semantic Code Search in Claude Code
-
-Tool descriptions, specified in `TOOL_STORE_DESCRIPTION` and `TOOL_FIND_DESCRIPTION`, guide Claude Code on how to use
-the MCP server. The ones provided above are examples and may need to be customized for your specific use case. However,
-Claude Code should be already able to:
-
-1. Use the `qdrant-store` tool to store code snippets with descriptions.
-2. Use the `qdrant-find` tool to search for relevant code snippets using natural language.
-
-### Run MCP server in Development Mode
-
-The MCP server can be run in development mode using the `mcp dev` command. This will start the server and open the MCP
-inspector in your browser.
-
-```shell
-COLLECTION_NAME=mcp-dev fastmcp dev src/mcp_server_qdrant/server.py
-```
-
-### Using with VS Code
-
-For one-click installation, click one of the install buttons below:
-
-[![Install with UVX in VS Code](https://img.shields.io/badge/VS_Code-UVX-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=qdrant&config=%7B%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22mcp-server-qdrant%22%5D%2C%22env%22%3A%7B%22QDRANT_URL%22%3A%22%24%7Binput%3AqdrantUrl%7D%22%2C%22QDRANT_API_KEY%22%3A%22%24%7Binput%3AqdrantApiKey%7D%22%2C%22COLLECTION_NAME%22%3A%22%24%7Binput%3AcollectionName%7D%22%7D%7D&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22qdrantUrl%22%2C%22description%22%3A%22Qdrant+URL%22%7D%2C%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22qdrantApiKey%22%2C%22description%22%3A%22Qdrant+API+Key%22%2C%22password%22%3Atrue%7D%2C%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22collectionName%22%2C%22description%22%3A%22Collection+Name%22%7D%5D) [![Install with UVX in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-UVX-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=qdrant&config=%7B%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22mcp-server-qdrant%22%5D%2C%22env%22%3A%7B%22QDRANT_URL%22%3A%22%24%7Binput%3AqdrantUrl%7D%22%2C%22QDRANT_API_KEY%22%3A%22%24%7Binput%3AqdrantApiKey%7D%22%2C%22COLLECTION_NAME%22%3A%22%24%7Binput%3AcollectionName%7D%22%7D%7D&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22qdrantUrl%22%2C%22description%22%3A%22Qdrant+URL%22%7D%2C%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22qdrantApiKey%22%2C%22description%22%3A%22Qdrant+API+Key%22%2C%22password%22%3Atrue%7D%2C%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22collectionName%22%2C%22description%22%3A%22Collection+Name%22%7D%5D&quality=insiders)
-
-[![Install with Docker in VS Code](https://img.shields.io/badge/VS_Code-Docker-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=qdrant&config=%7B%22command%22%3A%22docker%22%2C%22args%22%3A%5B%22run%22%2C%22-p%22%2C%228000%3A8000%22%2C%22-i%22%2C%22--rm%22%2C%22-e%22%2C%22QDRANT_URL%22%2C%22-e%22%2C%22QDRANT_API_KEY%22%2C%22-e%22%2C%22COLLECTION_NAME%22%2C%22mcp-server-qdrant%22%5D%2C%22env%22%3A%7B%22QDRANT_URL%22%3A%22%24%7Binput%3AqdrantUrl%7D%22%2C%22QDRANT_API_KEY%22%3A%22%24%7Binput%3AqdrantApiKey%7D%22%2C%22COLLECTION_NAME%22%3A%22%24%7Binput%3AcollectionName%7D%22%7D%7D&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22qdrantUrl%22%2C%22description%22%3A%22Qdrant+URL%22%7D%2C%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22qdrantApiKey%22%2C%22description%22%3A%22Qdrant+API+Key%22%2C%22password%22%3Atrue%7D%2C%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22collectionName%22%2C%22description%22%3A%22Collection+Name%22%7D%5D) [![Install with Docker in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Docker-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=qdrant&config=%7B%22command%22%3A%22docker%22%2C%22args%22%3A%5B%22run%22%2C%22-p%22%2C%228000%3A8000%22%2C%22-i%22%2C%22--rm%22%2C%22-e%22%2C%22QDRANT_URL%22%2C%22-e%22%2C%22QDRANT_API_KEY%22%2C%22-e%22%2C%22COLLECTION_NAME%22%2C%22mcp-server-qdrant%22%5D%2C%22env%22%3A%7B%22QDRANT_URL%22%3A%22%24%7Binput%3AqdrantUrl%7D%22%2C%22QDRANT_API_KEY%22%3A%22%24%7Binput%3AqdrantApiKey%7D%22%2C%22COLLECTION_NAME%22%3A%22%24%7Binput%3AcollectionName%7D%22%7D%7D&inputs=%5B%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22qdrantUrl%22%2C%22description%22%3A%22Qdrant+URL%22%7D%2C%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22qdrantApiKey%22%2C%22description%22%3A%22Qdrant+API+Key%22%2C%22password%22%3Atrue%7D%2C%7B%22type%22%3A%22promptString%22%2C%22id%22%3A%22collectionName%22%2C%22description%22%3A%22Collection+Name%22%7D%5D&quality=insiders)
-
-#### Manual Installation
-
-Add the following JSON block to your User Settings (JSON) file in VS Code. You can do this by pressing `Ctrl + Shift + P` and typing `Preferences: Open User Settings (JSON)`.
-
-```json
-{
-  "mcp": {
-    "inputs": [
-      {
-        "type": "promptString",
-        "id": "qdrantUrl",
-        "description": "Qdrant URL"
-      },
-      {
-        "type": "promptString",
-        "id": "qdrantApiKey",
-        "description": "Qdrant API Key",
-        "password": true
-      },
-      {
-        "type": "promptString",
-        "id": "collectionName",
-        "description": "Collection Name"
-      }
-    ],
-    "servers": {
-      "qdrant": {
-        "command": "uvx",
-        "args": ["mcp-server-qdrant"],
-        "env": {
-          "QDRANT_URL": "${input:qdrantUrl}",
-          "QDRANT_API_KEY": "${input:qdrantApiKey}",
-          "COLLECTION_NAME": "${input:collectionName}"
-        }
-      }
-    }
-  }
-}
-```
-
-Or if you prefer using Docker, add this configuration instead:
-
-```json
-{
-  "mcp": {
-    "inputs": [
-      {
-        "type": "promptString",
-        "id": "qdrantUrl",
-        "description": "Qdrant URL"
-      },
-      {
-        "type": "promptString",
-        "id": "qdrantApiKey",
-        "description": "Qdrant API Key",
-        "password": true
-      },
-      {
-        "type": "promptString",
-        "id": "collectionName",
-        "description": "Collection Name"
-      }
-    ],
-    "servers": {
-      "qdrant": {
-        "command": "docker",
-        "args": [
-          "run",
-          "-p", "8000:8000",
-          "-i",
-          "--rm",
-          "-e", "QDRANT_URL",
-          "-e", "QDRANT_API_KEY",
-          "-e", "COLLECTION_NAME",
-          "mcp-server-qdrant"
-        ],
-        "env": {
-          "QDRANT_URL": "${input:qdrantUrl}",
-          "QDRANT_API_KEY": "${input:qdrantApiKey}",
-          "COLLECTION_NAME": "${input:collectionName}"
-        }
-      }
-    }
-  }
-}
-```
-
-Alternatively, you can create a `.vscode/mcp.json` file in your workspace with the following content:
-
-```json
-{
-  "inputs": [
-    {
-      "type": "promptString",
-      "id": "qdrantUrl",
-      "description": "Qdrant URL"
-    },
-    {
-      "type": "promptString",
-      "id": "qdrantApiKey",
-      "description": "Qdrant API Key",
-      "password": true
-    },
-    {
-      "type": "promptString",
-      "id": "collectionName",
-      "description": "Collection Name"
-    }
-  ],
-  "servers": {
-    "qdrant": {
-      "command": "uvx",
-      "args": ["mcp-server-qdrant"],
-      "env": {
-        "QDRANT_URL": "${input:qdrantUrl}",
-        "QDRANT_API_KEY": "${input:qdrantApiKey}",
-        "COLLECTION_NAME": "${input:collectionName}"
-      }
-    }
-  }
-}
-```
-
-For workspace configuration with Docker, use this in `.vscode/mcp.json`:
-
-```json
-{
-  "inputs": [
-    {
-      "type": "promptString",
-      "id": "qdrantUrl",
-      "description": "Qdrant URL"
-    },
-    {
-      "type": "promptString",
-      "id": "qdrantApiKey",
-      "description": "Qdrant API Key",
-      "password": true
-    },
-    {
-      "type": "promptString",
-      "id": "collectionName",
-      "description": "Collection Name"
-    }
-  ],
-  "servers": {
-    "qdrant": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-p", "8000:8000",
-        "-i",
-        "--rm",
-        "-e", "QDRANT_URL",
-        "-e", "QDRANT_API_KEY",
-        "-e", "COLLECTION_NAME",
-        "mcp-server-qdrant"
-      ],
-      "env": {
-        "QDRANT_URL": "${input:qdrantUrl}",
-        "QDRANT_API_KEY": "${input:qdrantApiKey}",
-        "COLLECTION_NAME": "${input:collectionName}"
-      }
-    }
-  }
-}
-```
-
-## Contributing
-
-If you have suggestions for how mcp-server-qdrant could be improved, or want to report a bug, open an issue!
-We'd love all and any contributions.
-
-### Testing `mcp-server-qdrant` locally
-
-The [MCP inspector](https://github.com/modelcontextprotocol/inspector) is a developer tool for testing and debugging MCP
-servers. It runs both a client UI (default port 5173) and an MCP proxy server (default port 3000). Open the client UI in
-your browser to use the inspector.
-
-```shell
-QDRANT_URL=":memory:" COLLECTION_NAME="test" \
-fastmcp dev src/mcp_server_qdrant/server.py
-```
-
-Once started, open your browser to http://localhost:5173 to access the inspector interface.
 
 ## License
 
-This MCP server is licensed under the Apache License 2.0. This means you are free to use, modify, and distribute the
-software, subject to the terms and conditions of the Apache License 2.0. For more details, please see the LICENSE file
-in the project repository.
+Apache License 2.0

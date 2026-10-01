@@ -4,8 +4,8 @@ from typing import Annotated, Callable, Optional
 
 from pydantic import Field
 
-from mcp_server_qdrant.common.filters import make_filter
-from mcp_server_qdrant.settings import FilterableField
+from vector_brain.common.filters import make_filter
+from vector_brain.settings import FilterableField
 
 
 def wrap_filters(

@@ -1,5 +1,5 @@
-from mcp_server_qdrant.mcp_server import QdrantMCPServer
-from mcp_server_qdrant.settings import (
+from vector_brain.mcp_server import QdrantMCPServer
+from vector_brain.settings import (
     EmbeddingProviderSettings,
     QdrantSettings,
     ToolSettings,

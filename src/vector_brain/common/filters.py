@@ -2,8 +2,8 @@ from typing import Any
 
 from qdrant_client import models
 
-from mcp_server_qdrant.qdrant import ArbitraryFilter
-from mcp_server_qdrant.settings import METADATA_PATH, FilterableField
+from vector_brain.qdrant import ArbitraryFilter
+from vector_brain.settings import METADATA_PATH, FilterableField
 
 
 def make_filter(

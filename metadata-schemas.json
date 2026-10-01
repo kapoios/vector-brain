@@ -1,0 +1,61 @@
+{
+  "ai_thoughts": {
+    "enabled": true,
+    "read_only": false,
+    "field_prefix": "metadata",
+    "fields": {
+      "category": {
+        "type": "keyword",
+        "values": ["credential", "personal", "technical", "social", "financial", "health", "work", "general"]
+      },
+      "tags": {
+        "type": "keyword"
+      },
+      "subject": {
+        "type": "keyword"
+      },
+      "importance": {
+        "type": "keyword",
+        "values": ["low", "medium", "high", "critical"]
+      },
+      "confidence": {
+        "type": "float"
+      },
+      "source": {
+        "type": "keyword",
+        "values": ["user_stated", "observed", "inferred", "researched"]
+      },
+      "sentiment": {
+        "type": "keyword",
+        "values": ["positive", "negative", "neutral", "urgent"]
+      }
+    }
+  },
+  "api_documentation": {
+    "enabled": true,
+    "read_only": true,
+    "field_prefix": "",
+    "fields": {
+      "type": {
+        "type": "keyword",
+        "values": ["endpoint", "data_model"]
+      },
+      "method": {
+        "type": "keyword",
+        "values": ["GET", "POST", "PUT", "DELETE", "PATCH"]
+      },
+      "path": {
+        "type": "keyword"
+      },
+      "tags": {
+        "type": "keyword"
+      },
+      "operationId": {
+        "type": "keyword"
+      },
+      "name": {
+        "type": "keyword"
+      }
+    }
+  }
+}

@@ -957,49 +957,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mcp-server-qdrant"
-version = "0.8.1"
-source = { editable = "." }
-dependencies = [
-    { name = "fastembed" },
-    { name = "fastmcp" },
-    { name = "pydantic" },
-    { name = "qdrant-client" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "ipdb" },
-    { name = "isort" },
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastembed", specifier = ">=0.6.0" },
-    { name = "fastmcp", specifier = "==2.7.0" },
-    { name = "pydantic", specifier = ">=2.10.6,<2.12.0" },
-    { name = "qdrant-client", specifier = ">=1.12.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "ipdb", specifier = ">=0.13.13" },
-    { name = "isort", specifier = ">=6.0.1" },
-    { name = "mypy", specifier = ">=1.9.0" },
-    { name = "pre-commit", specifier = ">=4.1.0" },
-    { name = "pyright", specifier = ">=1.1.389" },
-    { name = "pytest", specifier = ">=8.3.3" },
-    { name = "pytest-asyncio", specifier = ">=0.23.0" },
-    { name = "ruff", specifier = ">=0.8.0" },
-]
-
-[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2405,6 +2362,51 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cb/ce/f06b84e2697fef4688ca63bdb2fdf113ca0a3be33f94488f2cadb690b0cf/uvicorn-0.38.0.tar.gz", hash = "sha256:fd97093bdd120a2609fc0d3afe931d4d4ad688b6e75f0f929fde1bc36fe0e91d", size = 80605, upload-time = "2025-10-18T13:46:44.63Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ee/d9/d88e73ca598f4f6ff671fb5fde8a32925c2e08a637303a1d12883c7305fa/uvicorn-0.38.0-py3-none-any.whl", hash = "sha256:48c0afd214ceb59340075b4a052ea1ee91c16fbc2a9b1469cca0e54566977b02", size = 68109, upload-time = "2025-10-18T13:46:42.958Z" },
+]
+
+[[package]]
+name = "vector-brain"
+version = "0.8.2"
+source = { editable = "." }
+dependencies = [
+    { name = "fastembed" },
+    { name = "fastmcp" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "qdrant-client" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ipdb" },
+    { name = "isort" },
+    { name = "mypy" },
+    { name = "pre-commit" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastembed", specifier = ">=0.6.0" },
+    { name = "fastmcp", specifier = "==2.7.0" },
+    { name = "pydantic", specifier = ">=2.10.6,<2.12.0" },
+    { name = "pydantic-settings", specifier = ">=2.12.0" },
+    { name = "qdrant-client", specifier = ">=1.12.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ipdb", specifier = ">=0.13.13" },
+    { name = "isort", specifier = ">=6.0.1" },
+    { name = "mypy", specifier = ">=1.9.0" },
+    { name = "pre-commit", specifier = ">=4.1.0" },
+    { name = "pyright", specifier = ">=1.1.389" },
+    { name = "pytest", specifier = ">=8.3.3" },
+    { name = "pytest-asyncio", specifier = ">=0.23.0" },
+    { name = "ruff", specifier = ">=0.8.0" },
 ]
 
 [[package]]

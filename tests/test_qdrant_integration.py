@@ -1,9 +1,23 @@
 import uuid
+from datetime import datetime
 
 import pytest
+from qdrant_client import models
 
-from mcp_server_qdrant.embeddings.fastembed import FastEmbedProvider
-from mcp_server_qdrant.qdrant import Entry, QdrantConnector
+from vector_brain.embeddings.fastembed import FastEmbedProvider
+from vector_brain.qdrant import Entry, QdrantConnector
+
+
+def assert_updated_at_stamped(metadata: dict | None) -> None:
+    """Edits always stamp a timezone-aware ISO-8601 ``updated_at`` timestamp."""
+    assert metadata is not None
+    assert "updated_at" in metadata
+    assert datetime.fromisoformat(metadata["updated_at"]).tzinfo is not None
+
+
+def without_updated_at(metadata: dict) -> dict:
+    """Return metadata without the auto-generated ``updated_at`` field."""
+    return {k: v for k, v in metadata.items() if k != "updated_at"}
 
 
 @pytest.fixture
@@ -236,3 +250,189 @@ async def test_nonexistent_collection_search(qdrant_connector):
 
     # Verify results
     assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_entry(qdrant_connector):
+    """Test storing an entry and then deleting it."""
+    test_entry = Entry(
+        content="This memory should be deleted",
+        metadata={"temporary": True},
+    )
+    await qdrant_connector.store(test_entry)
+
+    # Verify it exists
+    results = await qdrant_connector.search("memory should be deleted")
+    assert len(results) == 1
+
+    # Delete it
+    deleted = await qdrant_connector.delete("memory should be deleted")
+    assert len(deleted) == 1
+    assert deleted[0].content == test_entry.content
+
+    # Verify it's gone
+    results = await qdrant_connector.search("memory should be deleted")
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_nonexistent_collection(qdrant_connector):
+    """Test deleting from a collection that doesn't exist."""
+    nonexistent = f"nonexistent_{uuid.uuid4().hex}"
+    deleted = await qdrant_connector.delete("test query", collection_name=nonexistent)
+    assert len(deleted) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_no_match_empty_collection(qdrant_connector):
+    """Test deleting from an empty collection."""
+    deleted = await qdrant_connector.delete("nonexistent memory")
+    assert len(deleted) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_preserves_other_entries(qdrant_connector):
+    """Test that delete only removes the closest match."""
+    await qdrant_connector.store(Entry(content="Python is a programming language"))
+    await qdrant_connector.store(Entry(content="The Eiffel Tower is in Paris"))
+
+    # Delete only the Python entry
+    deleted = await qdrant_connector.delete("Python programming")
+    assert len(deleted) == 1
+    assert "Python" in deleted[0].content
+
+    # Eiffel Tower entry should still exist
+    results = await qdrant_connector.search("Eiffel Tower Paris")
+    assert len(results) == 1
+    assert "Eiffel" in results[0].content
+
+
+@pytest.mark.asyncio
+async def test_delete_custom_collection(qdrant_connector):
+    """Test deleting from a custom collection."""
+    custom_collection = f"custom_{uuid.uuid4().hex}"
+
+    await qdrant_connector.store(
+        Entry(content="Custom collection entry"),
+        collection_name=custom_collection,
+    )
+
+    deleted = await qdrant_connector.delete(
+        "custom collection", collection_name=custom_collection
+    )
+    assert len(deleted) == 1
+
+    results = await qdrant_connector.search(
+        "custom collection", collection_name=custom_collection
+    )
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_edit_updates_best_matching_entry(qdrant_connector):
+    """Test editing the closest matching entry."""
+    original_entry = Entry(
+        content="Paris is the capital of France",
+        metadata={"source": "atlas", "version": 1},
+    )
+    await qdrant_connector.store(original_entry)
+
+    updated_entry = await qdrant_connector.edit(
+        "capital of France",
+        Entry(
+            content="Paris is the capital and largest city of France",
+            metadata={"source": "atlas", "version": 2},
+        ),
+    )
+
+    assert updated_entry is not None
+    assert updated_entry.content == "Paris is the capital and largest city of France"
+    assert_updated_at_stamped(updated_entry.metadata)
+    assert without_updated_at(updated_entry.metadata) == {
+        "source": "atlas",
+        "version": 2,
+    }
+
+    results = await qdrant_connector.search("largest city of France")
+    assert len(results) == 1
+    assert results[0].content == updated_entry.content
+    assert results[0].metadata == updated_entry.metadata
+
+
+@pytest.mark.asyncio
+async def test_edit_preserves_metadata_when_not_reprovided(qdrant_connector):
+    """Test editing content while keeping the original metadata."""
+    await qdrant_connector.store(
+        Entry(
+            content="Mercury is the closest planet to the Sun",
+            metadata={"source": "encyclopedia", "verified": True},
+        )
+    )
+
+    updated_entry = await qdrant_connector.edit(
+        "closest planet to the Sun",
+        Entry(content="Mercury is the smallest planet in the Solar System"),
+    )
+
+    assert updated_entry is not None
+    assert_updated_at_stamped(updated_entry.metadata)
+    assert without_updated_at(updated_entry.metadata) == {
+        "source": "encyclopedia",
+        "verified": True,
+    }
+
+    results = await qdrant_connector.search("smallest planet in the Solar System")
+    assert len(results) == 1
+    assert results[0].content == "Mercury is the smallest planet in the Solar System"
+    assert results[0].metadata == updated_entry.metadata
+
+
+@pytest.mark.asyncio
+async def test_edit_does_not_mutate_caller_metadata(qdrant_connector):
+    """Test that stamping updated_at does not modify the metadata dict passed in."""
+    await qdrant_connector.store(Entry(content="Venus is the hottest planet"))
+
+    replacement_metadata = {"source": "nasa"}
+    updated_entry = await qdrant_connector.edit(
+        "hottest planet",
+        Entry(
+            content="Venus is the hottest planet in the Solar System",
+            metadata=replacement_metadata,
+        ),
+    )
+
+    assert updated_entry is not None
+    assert_updated_at_stamped(updated_entry.metadata)
+    assert replacement_metadata == {"source": "nasa"}
+
+
+@pytest.mark.asyncio
+async def test_edit_returns_none_when_collection_or_match_is_missing(qdrant_connector):
+    """Test edit returns None when nothing can be updated."""
+    missing_collection = f"missing_collection_{uuid.uuid4().hex}"
+
+    result = await qdrant_connector.edit(
+        "unknown entry",
+        Entry(content="Replacement"),
+        collection_name=missing_collection,
+    )
+
+    assert result is None
+
+    await qdrant_connector.store(Entry(content="Only stored entry"))
+
+    no_match = await qdrant_connector.edit(
+        "totally unrelated search phrase",
+        Entry(content="Should not replace anything"),
+        collection_name=qdrant_connector._default_collection_name,
+        query_filter=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="metadata.topic",
+                    match=models.MatchValue(value="none"),
+                )
+            ]
+        ),
+    )
+
+    assert no_match is None
